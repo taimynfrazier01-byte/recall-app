@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Recall | Timeline</title>
+    <title>Recall | Personal Timeline</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -21,47 +21,64 @@
         .bubble-inbound {
             border-bottom-left-radius: 4px;
         }
+
+        textarea {
+            caret-color: #3b82f6;
+        }
     </style>
 </head>
 
-<body id="mainBody" class="bg-slate-900 h-screen flex flex-col font-sans text-white">
+<body id="mainBody" class="bg-slate-900 h-screen flex flex-col font-sans text-slate-100 overflow-hidden">
 
-    <header class="bg-slate-800/80 backdrop-blur-md sticky top-0 z-10 border-b border-slate-700 p-4">
+    <header class="bg-slate-800/50 backdrop-blur-lg sticky top-0 z-20 border-b border-slate-700 p-4">
         <div class="max-w-2xl mx-auto flex items-center justify-between">
-            <h1 class="text-xl font-bold text-blue-400">Recall</h1>
+            <div class="flex items-center gap-2">
+                <div
+                    class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
+                    <i data-lucide="zap" class="w-5 h-5 text-white"></i>
+                </div>
+                <h1 class="text-xl font-bold tracking-tight text-white">Recall</h1>
+            </div>
             <div id="statusIndicator"
-                class="text-[10px] bg-slate-700 px-2 py-1 rounded-full uppercase tracking-widest text-slate-400">
-                Syncing...</div>
+                class="text-[9px] bg-slate-700 px-2 py-1 rounded-full uppercase tracking-widest text-slate-400 font-bold border border-slate-600">
+                Connecting...
+            </div>
         </div>
     </header>
 
-    <main id="timeline" class="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar max-w-2xl mx-auto w-full">
+    <main id="timeline" class="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar max-w-2xl mx-auto w-full pb-24">
+        <div id="loadingState" class="flex flex-col items-center justify-center py-20 space-y-4">
+            <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+            <p class="text-xs text-slate-500 font-medium uppercase tracking-widest">Fetching Memories</p>
+        </div>
     </main>
 
-    <footer class="bg-slate-800 border-t border-slate-700 p-4 pb-8 md:pb-4">
-        <div class="max-w-2xl mx-auto flex items-end gap-2">
+    <footer class="bg-slate-800 border-t border-slate-700 p-4 fixed bottom-0 left-0 right-0 z-30">
+        <div class="max-w-2xl mx-auto flex items-end gap-3">
             <input type="file" id="imageInput" accept="image/*" class="hidden">
             <button onclick="document.getElementById('imageInput').click()"
-                class="p-2 text-slate-400 hover:bg-slate-700 rounded-full">
+                class="p-3 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-colors active:scale-95 shadow-inner">
                 <i data-lucide="camera" class="w-6 h-6"></i>
             </button>
-            <div class="flex-1 bg-slate-700 rounded-2xl p-1 border border-slate-600">
+            <div
+                class="flex-1 bg-slate-900 rounded-2xl p-1 border border-slate-700 shadow-inner focus-within:border-blue-500 transition-colors">
                 <textarea id="messageInput" rows="1" placeholder="Log a memory..."
-                    class="w-full bg-transparent border-none focus:ring-0 p-2 text-sm text-white resize-none"></textarea>
+                    class="w-full bg-transparent border-none focus:ring-0 p-3 text-sm text-white resize-none"></textarea>
             </div>
             <button onclick="addEntry()"
-                class="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-full shadow-lg active:scale-95 transition-transform">
-                <i data-lucide="send" class="w-5 h-5"></i>
+                class="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl shadow-lg shadow-blue-900/40 active:scale-90 transition-all">
+                <i data-lucide="send" class="w-6 h-6"></i>
             </button>
         </div>
     </footer>
 
     <script>
+        // Supabase Configuration
         const SB_URL = 'https://kvpvjlyhijpjcqpqrvin.supabase.co';
         const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2cHZqbHloaXlwamNwcXBydmluIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjMzMzQsImV4cCI6MjA5MTU5OTMzNH0.qbUNlIhiZ2I8EwN0eBWeLGFwq5GoQHQ1JelntLkNNM0';
         const _supabase = supabase.createClient(SB_URL, SB_KEY);
 
-        // Critical: Wrapping table name in quotes to handle the hyphen
+        // Critical: The hyphen requires double-quotes inside single-quotes for SQL safety
         const TABLE_NAME = '"Recall-App"';
 
         lucide.createIcons();
@@ -69,23 +86,31 @@
         const messageInput = document.getElementById('messageInput');
         const status = document.getElementById('statusIndicator');
 
+        // Initial Connection Handshake
         async function init() {
-            const { error } = await _supabase.from(TABLE_NAME).select('count', { count: 'planned', head: true });
-            if (error) {
-                status.innerText = "Offline";
-                status.className = "text-[10px] bg-red-900/50 px-2 py-1 rounded-full uppercase text-red-400";
-            } else {
+            try {
+                const { error } = await _supabase.from(TABLE_NAME).select('count', { count: 'planned', head: true });
+                if (error) throw error;
+
                 status.innerText = "Connected";
-                status.className = "text-[10px] bg-green-900/50 px-2 py-1 rounded-full uppercase text-green-400";
+                status.className = "text-[9px] bg-green-500/10 px-2 py-1 rounded-full uppercase tracking-widest text-green-400 font-bold border border-green-500/20";
                 loadTimeline();
+            } catch (err) {
+                status.innerText = "Offline";
+                status.className = "text-[9px] bg-red-500/10 px-2 py-1 rounded-full uppercase tracking-widest text-red-400 font-bold border border-red-500/20";
+                console.error("Connection Failed:", err.message);
             }
         }
 
         async function loadTimeline() {
-            const { data } = await _supabase.from(TABLE_NAME).select('*').order('created_at', { ascending: true });
-            if (data) {
+            const { data, error } = await _supabase.from(TABLE_NAME).select('*').order('created_at', { ascending: true });
+            document.getElementById('loadingState')?.remove();
+
+            if (data && data.length > 0) {
                 timeline.innerHTML = '';
                 data.forEach(msg => render(msg.content, msg.image_url, msg.created_at));
+            } else if (data && data.length === 0) {
+                timeline.innerHTML = '<div class="text-center py-20 text-slate-600 text-xs font-bold uppercase tracking-widest">No memories logged yet.</div>';
             }
         }
 
@@ -95,32 +120,52 @@
             messageInput.value = '';
 
             const { error } = await _supabase.from(TABLE_NAME).insert([{ content: text }]);
-            if (!error) render(text, null, new Date());
-            else console.error("DB Error:", error.message);
+            if (!error) {
+                render(text, null, new Date());
+            } else {
+                alert("Storage Error: " + error.message);
+            }
         }
 
         document.getElementById('imageInput').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
-            const fileName = `${Date.now()}-${file.name}`;
-            const { error: upErr } = await _supabase.storage.from('recall-photos').upload(fileName, file);
+            // Visual feedback
+            status.innerText = "Uploading...";
 
-            if (upErr) return alert("Upload Error: " + upErr.message);
+            const fileName = `${Date.now()}-${file.name.replace(/\s/g, '_')}`;
+            const { data: upData, error: upErr } = await _supabase.storage.from('recall-photos').upload(fileName, file);
+
+            if (upErr) {
+                alert("Upload Failed: " + upErr.message);
+                status.innerText = "Connected";
+                return;
+            }
 
             const { data: urlData } = _supabase.storage.from('recall-photos').getPublicUrl(fileName);
-            await _supabase.from(TABLE_NAME).insert([{ content: "Photo Log", image_url: urlData.publicUrl }]);
-            render("Photo Log", urlData.publicUrl, new Date());
+            const text = messageInput.value.trim() || "Captured Moment";
+            messageInput.value = '';
+
+            const { error: dbErr } = await _supabase.from(TABLE_NAME).insert([{ content: text, image_url: urlData.publicUrl }]);
+
+            if (!dbErr) {
+                render(text, urlData.publicUrl, new Date());
+            }
+            status.innerText = "Connected";
         });
 
         function render(text, img, time) {
             const entryHTML = `
-                <div class="flex flex-col items-end space-y-1">
-                    <div class="bg-blue-600 p-3 rounded-2xl bubble-inbound shadow-lg max-w-[85%]">
-                        ${img ? `<img src="${img}" class="rounded-lg mb-2 border border-blue-400">` : ''}
-                        <p class="text-sm font-medium leading-relaxed">${text}</p>
+                <div class="flex flex-col items-end space-y-2 group">
+                    <div class="bg-blue-600 p-4 rounded-2xl bubble-inbound shadow-xl shadow-blue-900/10 max-w-[88%] border border-blue-500/50">
+                        ${img ? `<img src="${img}" class="rounded-xl mb-3 border border-blue-400/30 shadow-sm w-full object-cover">` : ''}
+                        <p class="text-[15px] font-medium leading-relaxed text-white tracking-tight">${text}</p>
                     </div>
-                    <span class="text-[9px] text-slate-500 font-bold mr-1 uppercase">${new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <div class="flex items-center gap-1.5 mr-1">
+                        <span class="text-[9px] text-slate-500 font-bold uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">Saved</span>
+                        <span class="text-[10px] text-slate-500 font-bold uppercase tracking-tight">${new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
                 </div>`;
             timeline.insertAdjacentHTML('beforeend', entryHTML);
             timeline.scrollTo({ top: timeline.scrollHeight, behavior: 'smooth' });
